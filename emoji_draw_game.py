@@ -12,15 +12,15 @@ mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=1,
-    model_complexity=1,
-    min_detection_confidence=0.9,
-    min_tracking_confidence=0.9
+    model_complexity=0,
+    min_detection_confidence=0.95,
+    min_tracking_confidence=0.95
 )
 
 # ========== Globals ==========
 canvas = None
 last_x, last_y = None, None
-current_color = (0, 0, 255)  # Default: Red
+current_color = (0, 0, 255)  # Default red
 
 # ========== Drawing ==========
 def draw_from_finger(x, y, drawing):
@@ -32,7 +32,7 @@ def draw_from_finger(x, y, drawing):
         cv2.line(canvas, (x, y), (last_x, last_y), current_color, thickness=8)
     last_x, last_y = x, y
 
-# ========== Gesture Detection ==========
+# ========== Gesture Detection (Index Only) ==========
 def is_drawing_gesture(landmarks):
     index_tip = landmarks.landmark[8].y
     index_pip = landmarks.landmark[6].y
@@ -94,9 +94,8 @@ def compare_images(canvas_np, emoji_path):
 def main():
     global canvas, last_x, last_y, current_color
 
-    screen_width = 640
+    screen_width = 1280
     screen_height = 720
-
     canvas = 255 * np.ones((screen_height, screen_width, 3), dtype=np.uint8)
 
     cap = cv2.VideoCapture(0)
@@ -134,8 +133,7 @@ def main():
 
             drawing = is_drawing_gesture(hand_landmarks)
 
-            if not reset_required and x > 0:
-                # Only draw if finger is over canvas side (right half of full screen)
+            if not reset_required:
                 draw_from_finger(x, y, drawing)
 
             color = (0, 255, 0) if drawing else (0, 0, 255)
@@ -158,7 +156,7 @@ def main():
         cv2.putText(ui, f"Time: {remaining}s", (30, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 200, 255), 3)
         if score_display is not None:
-            cv2.putText(ui, f"Score: {score_display}%", (300, 50),
+            cv2.putText(ui, f"Score: {score_display}%", (500, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 255, 0), 3)
 
         # Emoji target
@@ -166,18 +164,14 @@ def main():
         cv2.putText(ui, "🎯 Target", (screen_width - 170, 150),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
-        # Current brush color
+        # Show current color
         cv2.circle(ui, (screen_width - 180, 50), 20, current_color, -1)
 
-        # Combine webcam (left) + canvas (right)
+        # Combine left (cam) + right (canvas)
         stacked = np.hstack((ui, canvas))
 
-        # Optional: draw divider line between webcam and canvas
-        divider_x = screen_width
-        cv2.line(stacked, (divider_x, 0), (divider_x, screen_height), (0, 0, 0), thickness=4)
-
         if reset_required:
-            cv2.putText(stacked, "Press R to Reset", (screen_width + 50, screen_height - 50),
+            cv2.putText(stacked, "Press R to Reset", (screen_width - 180, screen_height - 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
 
         cv2.imshow("🧠 Emoji Drawing Game", stacked)
