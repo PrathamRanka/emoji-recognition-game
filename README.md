@@ -1,12 +1,22 @@
-# React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```emoji-draw-game/
+│
+├── public/
+│   └── emojis/            # Store emoji images here (like heart.png, smiley.png)
+│
+├── src/
+│   ├── assets/            # Optional: for logos or backgrounds
+│   ├── components/
+│   │   ├── EmojiDisplay.jsx       # Shows the current emoji
+│   │   ├── WebcamCanvas.jsx       # Captures webcam and draws with hand
+│   │   ├── Timer.jsx              # Countdown timer
+│   │   └── ScoreDisplay.jsx       # Shows score after game ends
+│   │
+│   ├── utils/
+│   │   ├── handTracker.js         # MediaPipe setup and hand tracking logic
+│   │   └── compareImages.js       # Compare drawn canvas vs emoji
+│   │
+│   ├── App.jsx            # Main layout + game logic
+│   ├── main.jsx           # React entry
+│   └── index.css          # Tailwind styles
+│
+└── tailwind.config.js
