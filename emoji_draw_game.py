@@ -34,15 +34,9 @@ def draw_from_finger(x, y, drawing):
 
 # ===== Gesture Detection =====
 def is_index_drawing(landmarks, threshold=0.02):
-    """
-    Returns True if index finger tip is clearly ahead of the middle finger joint
-    along the y-axis (i.e., pointing/extended).
-    Adjust threshold for sensitivity.
-    """
     index_tip = landmarks.landmark[8]
     index_mcp = landmarks.landmark[5]  # base of index finger
     return (index_tip.y + threshold) < index_mcp.y
-
 
 # ===== Load Random Emoji =====
 def get_random_emoji():
@@ -64,7 +58,6 @@ def preprocess_for_matching(img, out_size=300):
         _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         edges = th
 
-    # Morphology for smoother shapes
     kernel = np.ones((3, 3), np.uint8)
     edges = cv2.dilate(edges, kernel, iterations=1)
 
@@ -90,30 +83,24 @@ def compare_images(canvas_np, emoji_path, min_draw_pixels=2000):
     if emoji_raw is None:
         raise FileNotFoundError(f"Emoji not found: {emoji_path}")
 
-    # If emoji has transparency, use alpha mask
     if emoji_raw.ndim == 3 and emoji_raw.shape[2] == 4:
         alpha_mask = (emoji_raw[:, :, 3] > 0).astype(np.uint8) * 255
         emoji_bgr = cv2.cvtColor(alpha_mask, cv2.COLOR_GRAY2BGR)
     else:
-        # Fallback for no alpha channel
         gray = cv2.cvtColor(emoji_raw, cv2.COLOR_BGR2GRAY)
         _, alpha_mask = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)
         emoji_bgr = cv2.cvtColor(alpha_mask, cv2.COLOR_GRAY2BGR)
 
-    # Preprocess masks
     user_mask = preprocess_for_matching(canvas_np, out_size=300)
     emoji_mask = preprocess_for_matching(emoji_bgr, out_size=300)
 
-    # Morph closing for smoothing
     kernel = np.ones((5, 5), np.uint8)
     user_mask = cv2.morphologyEx(user_mask, cv2.MORPH_CLOSE, kernel)
     emoji_mask = cv2.morphologyEx(emoji_mask, cv2.MORPH_CLOSE, kernel)
 
-    # Enough drawing?
     if np.count_nonzero(user_mask) < min_draw_pixels:
         return 0
 
-    # Metrics
     ssim_score = ssim(user_mask, emoji_mask, data_range=255)
     inter = np.logical_and(user_mask > 0, emoji_mask > 0).sum()
     union = np.logical_or(user_mask > 0, emoji_mask > 0).sum()
@@ -121,12 +108,11 @@ def compare_images(canvas_np, emoji_path, min_draw_pixels=2000):
 
     contours_user, _ = cv2.findContours(user_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours_emoji, _ = cv2.findContours(emoji_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    shape_score = 0
     if contours_user and contours_emoji:
-        shape_score = 1 - min(cv2.matchShapes(contours_user[0], contours_emoji[0], cv2.CONTOURS_MATCH_I1, 0.0), 1.0)
-    else:
-        shape_score = 0
+        shape_score = 1 - min(cv2.matchShapes(contours_user[0], contours_emoji[0],
+                                              cv2.CONTOURS_MATCH_I1, 0.0), 1.0)
 
-    # Weighted score (IoU weighted more)
     final_score = (0.3 * ssim_score + 0.5 * iou + 0.2 * shape_score) * 100.0
     return int(round(max(0, min(100, final_score))))
 
@@ -137,9 +123,15 @@ def main():
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-    screen_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    screen_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    canvas = 255 * np.ones((screen_height, screen_width, 3), dtype=np.uint8)
+
+    ret, frame = cap.read()
+    if not ret:
+        print("Camera not available")
+        return
+
+    # Match canvas to actual frame size
+    frame_height, frame_width = frame.shape[:2]
+    canvas = 255 * np.ones((frame_height, frame_width, 3), dtype=np.uint8)
 
     score_display = None
     timer_duration = 30
@@ -149,7 +141,6 @@ def main():
     emoji_path = os.path.join("public", "emojis", emoji_filename)
     emoji_img = cv2.imread(emoji_path, cv2.IMREAD_UNCHANGED)
     if emoji_img.shape[2] == 4:
-        # Convert RGBA to BGR for display
         alpha = emoji_img[:, :, 3] / 255.0
         bgr = emoji_img[:, :, :3]
         white_bg = np.ones_like(bgr, dtype=np.uint8) * 255
@@ -159,6 +150,9 @@ def main():
 
     print(f"🎯 Draw this emoji: {emoji_filename}")
     print("✍️ Pinch to draw. Keys: 2=Yellow, 3=Black, 4=Blue, c=Clear, r=Restart")
+
+    cv2.namedWindow("🧠 Emoji Drawing Game", cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty("🧠 Emoji Drawing Game", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -172,9 +166,10 @@ def main():
         if results.multi_hand_landmarks:
             hand_landmarks = results.multi_hand_landmarks[0]
             index_tip = hand_landmarks.landmark[8]
-            x = int(index_tip.x * screen_width)
-            y = int(index_tip.y * screen_height)
-            drawing = is_index_drawing(hand_landmarks)  # always True
+            # Map directly to canvas size
+            x = int(index_tip.x * canvas.shape[1])
+            y = int(index_tip.y * canvas.shape[0])
+            drawing = is_index_drawing(hand_landmarks)
             if not reset_required:
                 draw_from_finger(x, y, drawing)
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -192,12 +187,10 @@ def main():
         if score_display is not None:
             cv2.putText(overlay, f"Score: {score_display}%", (500, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 255, 0), 3)
-        overlay[10:130, screen_width - 130:screen_width - 10] = emoji_img
-        cv2.putText(overlay, "Target", (screen_width - 170, 150),
+        overlay[10:130, overlay.shape[1] - 130:overlay.shape[1] - 10] = emoji_img
+        cv2.putText(overlay, "Target", (overlay.shape[1] - 170, 150),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
-        cv2.namedWindow("🧠 Emoji Drawing Game", cv2.WND_PROP_FULLSCREEN)
-        cv2.setWindowProperty("🧠 Emoji Drawing Game", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
         cv2.imshow("🧠 Emoji Drawing Game", overlay)
 
         key = cv2.waitKey(1) & 0xFF
