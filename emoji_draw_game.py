@@ -33,24 +33,28 @@ def draw_from_finger(x, y, drawing):
     last_x, last_y = x, y
 
 # ===== Gesture Detection =====
-def is_pinch_gesture(landmarks):
-    thumb_tip = landmarks.landmark[4]
+def is_index_drawing(landmarks, threshold=0.02):
+    """
+    Returns True if index finger tip is clearly ahead of the middle finger joint
+    along the y-axis (i.e., pointing/extended).
+    Adjust threshold for sensitivity.
+    """
     index_tip = landmarks.landmark[8]
-    dist = np.sqrt((thumb_tip.x - index_tip.x) ** 2 +
-                   (thumb_tip.y - index_tip.y) ** 2)
-    return dist < 0.05
+    index_mcp = landmarks.landmark[5]  # base of index finger
+    return (index_tip.y + threshold) < index_mcp.y
+
 
 # ===== Load Random Emoji =====
 def get_random_emoji():
     folder = "public/emojis"
     if not os.path.exists(folder):
         raise Exception("Folder 'public/emojis' not found")
-    emojis = [f for f in os.listdir(folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    emojis = [f for f in os.listdir(folder) if f.lower().endswith('.png')]
     if not emojis:
-        raise Exception("No emojis found in public/emojis")
+        raise Exception("No PNG emojis found in public/emojis")
     return random.choice(emojis)
 
-# ===== Scoring =====
+# ===== Preprocess for Matching =====
 def preprocess_for_matching(img, out_size=300):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -60,7 +64,7 @@ def preprocess_for_matching(img, out_size=300):
         _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         edges = th
 
-    # Slightly stronger morphology for smoother shapes
+    # Morphology for smoother shapes
     kernel = np.ones((3, 3), np.uint8)
     edges = cv2.dilate(edges, kernel, iterations=1)
 
@@ -80,42 +84,41 @@ def preprocess_for_matching(img, out_size=300):
     out = cv2.resize(square, (out_size, out_size), interpolation=cv2.INTER_NEAREST)
     return out
 
-
-def compare_images(canvas_np, emoji_path, min_draw_pixels=250):
+# ===== Compare Images =====
+def compare_images(canvas_np, emoji_path, min_draw_pixels=2000):
     emoji_raw = cv2.imread(emoji_path, cv2.IMREAD_UNCHANGED)
     if emoji_raw is None:
         raise FileNotFoundError(f"Emoji not found: {emoji_path}")
 
-    # Handle transparency
+    # If emoji has transparency, use alpha mask
     if emoji_raw.ndim == 3 and emoji_raw.shape[2] == 4:
-        alpha = (emoji_raw[:, :, 3] / 255.0).astype(np.float32)
-        bgr = emoji_raw[:, :, :3].astype(np.float32)
-        white_bg = np.ones_like(bgr) * 255.0
-        emoji_bgr = (bgr * alpha[:, :, None] + white_bg * (1.0 - alpha[:, :, None])).astype(np.uint8)
+        alpha_mask = (emoji_raw[:, :, 3] > 0).astype(np.uint8) * 255
+        emoji_bgr = cv2.cvtColor(alpha_mask, cv2.COLOR_GRAY2BGR)
     else:
-        emoji_bgr = emoji_raw[:, :, :3] if emoji_raw.ndim == 3 else cv2.cvtColor(emoji_raw, cv2.COLOR_GRAY2BGR)
+        # Fallback for no alpha channel
+        gray = cv2.cvtColor(emoji_raw, cv2.COLOR_BGR2GRAY)
+        _, alpha_mask = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)
+        emoji_bgr = cv2.cvtColor(alpha_mask, cv2.COLOR_GRAY2BGR)
 
-    # Preprocess
+    # Preprocess masks
     user_mask = preprocess_for_matching(canvas_np, out_size=300)
     emoji_mask = preprocess_for_matching(emoji_bgr, out_size=300)
 
-    # Morph closing to smooth shapes and fill gaps
+    # Morph closing for smoothing
     kernel = np.ones((5, 5), np.uint8)
     user_mask = cv2.morphologyEx(user_mask, cv2.MORPH_CLOSE, kernel)
     emoji_mask = cv2.morphologyEx(emoji_mask, cv2.MORPH_CLOSE, kernel)
 
     # Enough drawing?
-    user_pixels = int(np.count_nonzero(user_mask))
-    if user_pixels < min_draw_pixels:
+    if np.count_nonzero(user_mask) < min_draw_pixels:
         return 0
 
-    # Scores
+    # Metrics
     ssim_score = ssim(user_mask, emoji_mask, data_range=255)
     inter = np.logical_and(user_mask > 0, emoji_mask > 0).sum()
     union = np.logical_or(user_mask > 0, emoji_mask > 0).sum()
     iou = (inter / union) if union > 0 else 0.0
 
-    # Shape matching
     contours_user, _ = cv2.findContours(user_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours_emoji, _ = cv2.findContours(emoji_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours_user and contours_emoji:
@@ -123,10 +126,9 @@ def compare_images(canvas_np, emoji_path, min_draw_pixels=250):
     else:
         shape_score = 0
 
-    # Weighted final score (more shape influence)
-    final_score = (0.6 * ssim_score + 0.25 * iou + 0.15 * shape_score) * 100.0
+    # Weighted score (IoU weighted more)
+    final_score = (0.3 * ssim_score + 0.5 * iou + 0.2 * shape_score) * 100.0
     return int(round(max(0, min(100, final_score))))
-
 
 # ===== Main =====
 def main():
@@ -145,7 +147,13 @@ def main():
 
     emoji_filename = get_random_emoji()
     emoji_path = os.path.join("public", "emojis", emoji_filename)
-    emoji_img = cv2.imread(emoji_path)
+    emoji_img = cv2.imread(emoji_path, cv2.IMREAD_UNCHANGED)
+    if emoji_img.shape[2] == 4:
+        # Convert RGBA to BGR for display
+        alpha = emoji_img[:, :, 3] / 255.0
+        bgr = emoji_img[:, :, :3]
+        white_bg = np.ones_like(bgr, dtype=np.uint8) * 255
+        emoji_img = (bgr * alpha[:, :, None] + white_bg * (1 - alpha[:, :, None])).astype(np.uint8)
     emoji_img = cv2.resize(emoji_img, (120, 120))
     start_time = time.time()
 
@@ -166,8 +174,7 @@ def main():
             index_tip = hand_landmarks.landmark[8]
             x = int(index_tip.x * screen_width)
             y = int(index_tip.y * screen_height)
-            if is_pinch_gesture(hand_landmarks):
-                drawing = True
+            drawing = is_index_drawing(hand_landmarks)  # always True
             if not reset_required:
                 draw_from_finger(x, y, drawing)
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -199,12 +206,17 @@ def main():
         elif key == ord('c') and not reset_required:
             canvas[:, :] = 255
             last_x, last_y = None, None
-        elif key == ord('r') and reset_required:
+        elif key == ord('r'):
             canvas[:, :] = 255
             last_x, last_y = None, None
             emoji_filename = get_random_emoji()
             emoji_path = os.path.join("public", "emojis", emoji_filename)
-            emoji_img = cv2.imread(emoji_path)
+            emoji_img = cv2.imread(emoji_path, cv2.IMREAD_UNCHANGED)
+            if emoji_img.shape[2] == 4:
+                alpha = emoji_img[:, :, 3] / 255.0
+                bgr = emoji_img[:, :, :3]
+                white_bg = np.ones_like(bgr, dtype=np.uint8) * 255
+                emoji_img = (bgr * alpha[:, :, None] + white_bg * (1 - alpha[:, :, None])).astype(np.uint8)
             emoji_img = cv2.resize(emoji_img, (120, 120))
             score_display = None
             reset_required = False
