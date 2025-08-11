@@ -21,16 +21,21 @@ mp_draw = mp.solutions.drawing_utils
 last_x, last_y = None, None
 current_color = (0, 0, 255)  # Default red
 canvas = None
+eraser_mode = False
+
 
 # ===== Drawing =====
 def draw_from_finger(x, y, drawing):
-    global last_x, last_y, canvas, current_color
+    global last_x, last_y, canvas, current_color, eraser_mode
     if not drawing:
         last_x, last_y = None, None
         return
+    color = (255, 255, 255) if eraser_mode else current_color
+    thickness = 30 if eraser_mode else 8
     if last_x is not None and last_y is not None:
-        cv2.line(canvas, (x, y), (last_x, last_y), current_color, thickness=8)
+        cv2.line(canvas, (x, y), (last_x, last_y), color, thickness=thickness)
     last_x, last_y = x, y
+
 
 # ===== Gesture Detection =====
 def is_index_drawing(landmarks, threshold=0.02):
@@ -118,7 +123,7 @@ def compare_images(canvas_np, emoji_path, min_draw_pixels=2000):
 
 # ===== Main =====
 def main():
-    global canvas, last_x, last_y, current_color
+    global canvas, last_x, last_y, current_color, eraser_mode
 
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
@@ -220,6 +225,11 @@ def main():
             current_color = (0, 0, 0)      # Black
         elif key == ord('4'):
             current_color = (255, 0, 0)    # Blue
+        elif key == ord('e'):
+          eraser_mode = not eraser_mode
+    mode = "Eraser" if eraser_mode else "Draw"
+    print(f"✏️ Mode: {mode}")
+
 
     cap.release()
     cv2.destroyAllWindows()
