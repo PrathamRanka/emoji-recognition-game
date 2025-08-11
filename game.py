@@ -23,6 +23,7 @@ current_color = (0, 0, 255)  # Default red
 canvas = None
 eraser_mode = False
 
+
 # ===== Drawing =====
 def draw_from_finger(x, y, drawing):
     global last_x, last_y, canvas, current_color, eraser_mode
@@ -34,6 +35,7 @@ def draw_from_finger(x, y, drawing):
     if last_x is not None and last_y is not None:
         cv2.line(canvas, (x, y), (last_x, last_y), color, thickness=thickness)
     last_x, last_y = x, y
+
 
 # ===== Gesture Detection =====
 def is_index_drawing(landmarks, threshold=0.02):
@@ -116,7 +118,7 @@ def compare_images(canvas_np, emoji_path, min_draw_pixels=2000):
         shape_score = 1 - min(cv2.matchShapes(contours_user[0], contours_emoji[0],
                                               cv2.CONTOURS_MATCH_I1, 0.0), 1.0)
 
-    final_score = (0.45 * ssim_score + 0.35 * iou + 0.2 * shape_score) * 100.0
+    final_score = (0.3 * ssim_score + 0.5 * iou + 0.2 * shape_score) * 100.0
     return int(round(max(0, min(100, final_score))))
 
 # ===== Main =====
@@ -151,6 +153,9 @@ def main():
     emoji_img = cv2.resize(emoji_img, (120, 120))
     start_time = time.time()
 
+    print(f"🎯 Draw this emoji: {emoji_filename}")
+    print("✍️ Pinch to draw. Keys: 2=Yellow, 3=Black, 4=Blue, c=Clear, r=Restart")
+
     cv2.namedWindow("🧠 Emoji Drawing Game", cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty("🧠 Emoji Drawing Game", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
@@ -166,6 +171,7 @@ def main():
         if results.multi_hand_landmarks:
             hand_landmarks = results.multi_hand_landmarks[0]
             index_tip = hand_landmarks.landmark[8]
+            # Map directly to canvas size
             x = int(index_tip.x * canvas.shape[1])
             y = int(index_tip.y * canvas.shape[0])
             drawing = is_index_drawing(hand_landmarks)
@@ -177,38 +183,18 @@ def main():
         remaining = max(0, int(timer_duration - elapsed))
         if remaining == 0 and score_display is None:
             score_display = compare_images(canvas, emoji_path)
+            print(f"✅ Time's up! Score: {score_display}%")
             reset_required = True
 
-        overlay = cv2.addWeighted(frame, 0.55, canvas, 0.45, 0)
-
-        # --- UI improvements below ---
-
-        # Top bar background
-        cv2.rectangle(overlay, (0, 0), (overlay.shape[1], 90), (20, 20, 20), -1)
-
-        # Time
-        cv2.putText(overlay, f"⏳ {remaining}s", (30, 60),
-                    cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 200, 255), 2, cv2.LINE_AA)
-
-        # Score
+        overlay = cv2.addWeighted(frame, 0.5, canvas, 0.5, 0)
+        cv2.putText(overlay, f"Time: {remaining}s", (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 200, 255), 3)
         if score_display is not None:
-            cv2.putText(overlay, f"🏆 {score_display}%", (200, 60),
-                        cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 255, 0), 2, cv2.LINE_AA)
-
-        # Tool mode indicator
-        if eraser_mode:
-            cv2.putText(overlay, "🩹 Eraser Selected", (420, 60),
-                        cv2.FONT_HERSHEY_DUPLEX, 1.2, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.rectangle(overlay, (410, 25), (760, 75), (200, 0, 0), 2)
-        else:
-            cv2.putText(overlay, "✏️ Drawing", (420, 60),
-                        cv2.FONT_HERSHEY_DUPLEX, 1.2, current_color, 2, cv2.LINE_AA)
-            cv2.rectangle(overlay, (410, 25), (680, 75), current_color, 2)
-
-        # Target emoji in top right
+            cv2.putText(overlay, f"Score: {score_display}%", (500, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 255, 0), 3)
         overlay[10:130, overlay.shape[1] - 130:overlay.shape[1] - 10] = emoji_img
-        cv2.putText(overlay, "🎯 Target", (overlay.shape[1] - 180, 150),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(overlay, "Target", (overlay.shape[1] - 170, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         cv2.imshow("🧠 Emoji Drawing Game", overlay)
 
@@ -240,8 +226,10 @@ def main():
         elif key == ord('4'):
             current_color = (255, 0, 0)    # Blue
         elif key == ord('e'):
-            eraser_mode = not eraser_mode
-            print(f"✏️ Mode: {'Eraser' if eraser_mode else 'Draw'}")
+          eraser_mode = not eraser_mode
+    mode = "Eraser" if eraser_mode else "Draw"
+    print(f"✏️ Mode: {mode}")
+
 
     cap.release()
     cv2.destroyAllWindows()
